@@ -1,3 +1,17 @@
+// Safeguard React refresh globals in environments without preamble injection
+if (typeof window !== 'undefined') {
+  const win = window as unknown as {
+    $RefreshReg$?: () => void;
+    $RefreshSig$?: () => (type: unknown) => unknown;
+  };
+  if (!win.$RefreshReg$) {
+    win.$RefreshReg$ = () => {};
+  }
+  if (!win.$RefreshSig$) {
+    win.$RefreshSig$ = () => (type: unknown) => type;
+  }
+}
+
 import {
   Component,
   type ComponentType,
@@ -28,6 +42,12 @@ function toError(value: unknown): Error {
   if (typeof value === 'string') {
     return new Error(value);
   }
+  if (value && typeof value === 'object') {
+    const candidate = (value as { message?: unknown; error?: unknown }).message ?? (value as { error?: unknown }).error;
+    if (typeof candidate === 'string' && candidate.trim()) {
+      return new Error(candidate);
+    }
+  }
   try {
     return new Error(JSON.stringify(value));
   } catch {
@@ -37,27 +57,25 @@ function toError(value: unknown): Error {
 
 function DefaultFallback({ error, resetError }: ErrorFallbackProps) {
   return (
-    <div className="min-h-screen w-full flex items-center justify-center bg-gray-50 p-6">
+    <div className="min-h-screen w-full flex items-center justify-center bg-stone-50 p-6">
       <div className="max-w-lg w-full text-center">
-        <h1 className="text-xl font-semibold text-gray-900">
-          Something went wrong
+        <h1 className="text-xl font-semibold text-stone-900">
+          Algo no salió como esperábamos
         </h1>
-        <p className="mt-2 text-sm text-gray-600">
-          This part of the app hit an error. The rest of the app is still
-          running.
+        <p className="mt-2 text-sm text-stone-600">
+          Ocurrió un error inesperado al cargar esta sección. Puedes intentar nuevamente.
         </p>
-        {/* Dev only: messages can carry API responses and other internals. */}
         {import.meta.env.DEV ? (
-          <pre className="mt-4 overflow-x-auto rounded bg-gray-100 p-3 text-left text-xs text-gray-800">
+          <pre className="mt-4 overflow-x-auto rounded bg-stone-100 p-3 text-left text-xs text-stone-800">
             {error.message || String(error)}
           </pre>
         ) : null}
         <button
           type="button"
           onClick={resetError}
-          className="mt-4 rounded bg-gray-900 px-4 py-2 text-sm text-white hover:bg-gray-700"
+          className="mt-4 rounded-lg bg-stone-900 px-5 py-2 text-sm font-medium text-white hover:bg-stone-800 transition-colors"
         >
-          Try again
+          Reintentar
         </button>
       </div>
     </div>
@@ -104,3 +122,6 @@ export class ErrorBoundary extends Component<
     return <Fallback error={error} resetError={this.resetError} />;
   }
 }
+
+export default ErrorBoundary;
+

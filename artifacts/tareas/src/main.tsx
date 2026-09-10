@@ -1,3 +1,16 @@
+if (typeof window !== 'undefined') {
+  const win = window as unknown as {
+    $RefreshReg$?: () => void;
+    $RefreshSig$?: () => (type: unknown) => unknown;
+  };
+  if (!win.$RefreshReg$) {
+    win.$RefreshReg$ = () => {};
+  }
+  if (!win.$RefreshSig$) {
+    win.$RefreshSig$ = () => (type: unknown) => type;
+  }
+}
+
 import { createRoot } from 'react-dom/client';
 
 import App from './App';

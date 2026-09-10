@@ -1,0 +1,8 @@
+{
+  "name": "Tareas Biología",
+  "description": "Aplicación escolar para publicar y consultar tareas organizadas por curso para profesores y estudiantes.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

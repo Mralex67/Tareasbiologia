@@ -1,5 +1,5 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
-import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/react-query';
+import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
 import {
   Bell,
   BellRing,
@@ -9,6 +9,8 @@ import {
   ChevronRight,
   CircleAlert,
   ClipboardList,
+  Copy,
+  Database,
   FilePenLine,
   GraduationCap,
   LogOut,
@@ -41,6 +43,34 @@ const SESSION_KEY = 'tareas.auth-session';
 const REMINDER_KEY = 'tareas.reminders';
 const COURSES: CourseCode[] = ['1A', '2A', '3A', '4A', '5A', '6A'];
 
+const memoryStore: Record<string, string> = {};
+
+function safeStorageGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key) ?? memoryStore[key] ?? null;
+  } catch {
+    return memoryStore[key] ?? null;
+  }
+}
+
+function safeStorageSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch {
+    // blocked or unavailable in sandboxed environment
+  }
+  memoryStore[key] = value;
+}
+
+function safeStorageRemove(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // blocked or unavailable in sandboxed environment
+  }
+  delete memoryStore[key];
+}
+
 type InstallPrompt = Event & {
   prompt: () => Promise<void>;
   userChoice: Promise<{ outcome: 'accepted' | 'dismissed' }>;
@@ -48,7 +78,7 @@ type InstallPrompt = Event & {
 
 setAuthTokenGetter(() => {
   try {
-    const stored = localStorage.getItem(SESSION_KEY);
+    const stored = safeStorageGet(SESSION_KEY);
     return stored ? (JSON.parse(stored) as AuthSession).token : null;
   } catch {
     return null;
@@ -57,7 +87,7 @@ setAuthTokenGetter(() => {
 
 function readSession(): AuthSession | null {
   try {
-    const stored = localStorage.getItem(SESSION_KEY);
+    const stored = safeStorageGet(SESSION_KEY);
     return stored ? (JSON.parse(stored) as AuthSession) : null;
   } catch {
     return null;
@@ -65,11 +95,11 @@ function readSession(): AuthSession | null {
 }
 
 function saveSession(session: AuthSession) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  safeStorageSet(SESSION_KEY, JSON.stringify(session));
 }
 
 function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
+  safeStorageRemove(SESSION_KEY);
 }
 
 function errorMessage(error: unknown, fallback = 'No pudimos completar la acción.') {
@@ -239,24 +269,44 @@ function Home() {
           <div className="form-row">
             <span className="field-label">¿Cómo vas a entrar?</span>
             <div className="role-grid">
-              <RoleChoice role="student" selected={role === 'student'} onSelect={() => setRole('student')} />
-              <RoleChoice role="teacher" selected={role === 'teacher'} onSelect={() => setRole('teacher')} />
+              <RoleChoice role="student" selected={role === 'student'} onSelect={() => { setRole('student'); setPassword(''); }} />
+              <RoleChoice role="teacher" selected={role === 'teacher'} onSelect={() => { setRole('teacher'); setPassword(''); }} />
             </div>
           </div>
-          <div className="form-row">
-            <label className="field-label" htmlFor="password">Contraseña</label>
-            <input
-              id="password"
-              className="field"
-              type="password"
-              autoComplete="current-password"
-              placeholder="Escribe la contraseña"
-              value={password}
-              onChange={(event) => setPassword(event.target.value)}
-              data-testid="input-password"
-            />
-            {login.isError && <p className="error-note" data-testid="status-login-error">{errorMessage(login.error, 'La contraseña no es correcta.')}</p>}
-          </div>
+          {role === 'student' ? (
+            <div className="form-row">
+              <label className="field-label" htmlFor="password">Contraseña de tu curso</label>
+              <input
+                id="password"
+                className="field"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Escribe la contraseña de tu curso"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                data-testid="input-password"
+              />
+              <span style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))', marginTop: '5px', display: 'block' }}>
+                Ingresa la contraseña que te indicó el profesor para acceder a las tareas de tu curso.
+              </span>
+              {login.isError && <p className="error-note" data-testid="status-login-error">{errorMessage(login.error, 'La contraseña no es correcta.')}</p>}
+            </div>
+          ) : (
+            <div className="form-row">
+              <label className="field-label" htmlFor="password">Contraseña de profesor</label>
+              <input
+                id="password"
+                className="field"
+                type="password"
+                autoComplete="current-password"
+                placeholder="Escribe tu contraseña de profesor"
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                data-testid="input-password"
+              />
+              {login.isError && <p className="error-note" data-testid="status-login-error">{errorMessage(login.error, 'La contraseña no es correcta.')}</p>}
+            </div>
+          )}
           <button className="primary-btn wide-btn" type="submit" disabled={login.isPending || !password.trim()} data-testid="button-login">
             {login.isPending ? 'Comprobando…' : 'Entrar a Tareas'}
             {!login.isPending && <ChevronRight size={17} />}
@@ -510,6 +560,23 @@ function TaskFormModal({
   );
 }
 
+const SUPABASE_TASKS_SQL = `-- Ejecutar en Supabase > SQL Editor
+create table if not exists public.tasks (
+  id integer generated by default as identity primary key,
+  course text not null check (course in ('1A', '2A', '3A', '4A', '5A', '6A')),
+  title text not null,
+  description text not null default '',
+  due_at timestamptz not null,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists tasks_course_due_at_idx
+  on public.tasks (course, due_at);
+
+-- Habilitar permisos de lectura y escritura
+alter table public.tasks disable row level security;`;
+
 function TeacherPage() {
   const [, setLocation] = useLocation();
   const sessionQuery = useGetCurrentSession({ query: { queryKey: getGetCurrentSessionQueryKey(), enabled: Boolean(readSession()?.token), retry: false } });
@@ -518,6 +585,33 @@ function TeacherPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
+  const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
+  const [copiedSql, setCopiedSql] = useState(false);
+
+  const dbStatusQuery = useQuery({
+    queryKey: ['db-status'],
+    queryFn: async () => {
+      try {
+        const res = await fetch('/api/db-status');
+        if (!res.ok) throw new Error('Status request failed');
+        return (await res.json()) as {
+          activeDatabase: string;
+          isSupabase: boolean;
+          isPartial: boolean;
+          diagnostics?: { message: string; isReady: boolean; urlIsPlaceholder: boolean };
+        };
+      } catch {
+        return {
+          activeDatabase: 'En memoria (Local)',
+          isSupabase: false,
+          isPartial: false,
+          diagnostics: { message: 'Operando localmente.', isReady: false, urlIsPlaceholder: false },
+        };
+      }
+    },
+  });
+
   const taskQuery = useListTasks(
     { course },
     { query: { queryKey: getListTasksQueryKey({ course }), enabled: Boolean(course), retry: false } },
@@ -546,10 +640,22 @@ function TeacherPage() {
       createTask.mutate({ data: input }, { onSuccess: () => { invalidate(); closeForm(); } });
     }
   };
-  const removeTask = (task: Task) => {
-    if (!window.confirm(`¿Eliminar “${task.title}”? Esta acción no se puede deshacer.`)) return;
+  const confirmDeleteTask = (task: Task) => {
     setDeletingTaskId(task.id);
-    deleteTask.mutate({ id: task.id }, { onSuccess: () => { setDeletingTaskId(null); invalidate(); }, onError: () => setDeletingTaskId(null) });
+    deleteTask.mutate(
+      { id: task.id },
+      {
+        onSuccess: () => {
+          setDeletingTaskId(null);
+          setTaskToDelete(null);
+          invalidate();
+        },
+        onError: () => {
+          setDeletingTaskId(null);
+          setTaskToDelete(null);
+        },
+      },
+    );
   };
   const pending = createTask.isPending || updateTask.isPending;
   const mutationError = createTask.error ?? updateTask.error;
@@ -563,7 +669,30 @@ function TeacherPage() {
             <h1>Todo listo para<br />enseñar mejor.</h1>
             <p>Publica lo necesario para que tu curso avance sin preguntas de último minuto.</p>
           </div>
-          <button type="button" className="primary-btn" onClick={openNew} data-testid="button-new-task"><Plus size={18} /><span>Nueva tarea</span></button>
+          <div style={{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => setSupabaseModalOpen(true)}
+              data-testid="button-supabase-status"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}
+            >
+              <Database size={16} />
+              <span>{dbStatusQuery.data?.isSupabase ? 'Supabase Conectado' : 'BD: Local / Supabase'}</span>
+              <span
+                style={{
+                  width: '8px',
+                  height: '8px',
+                  borderRadius: '50%',
+                  backgroundColor: dbStatusQuery.data?.isSupabase ? '#16a34a' : '#a8a29e',
+                }}
+              />
+            </button>
+            <button type="button" className="primary-btn" onClick={openNew} data-testid="button-new-task">
+              <Plus size={18} />
+              <span>Nueva tarea</span>
+            </button>
+          </div>
         </div>
         <div className="stat-strip animate-in delay-1">
           <div className="stat-card"><div className="stat-label">Curso seleccionado</div><div className="stat-value">{course}</div><div className="stat-sub">Tu espacio de publicación</div></div>
@@ -578,12 +707,136 @@ function TeacherPage() {
             </div>
             {deleteTask.isError && <p className="error-note" style={{ padding: '13px 20px 0' }} data-testid="status-delete-error">{errorMessage(deleteTask.error, 'No pudimos eliminar la tarea.')}</p>}
             {taskQuery.isLoading ? <TaskSkeleton /> : tasks.length === 0 ? <EmptyTasks /> : (
-              <div className="task-list">{tasks.map((task) => <TaskCard key={task.id} task={task} teacher onEdit={() => openEdit(task)} onDelete={() => removeTask(task)} deletePending={deletingTaskId === task.id} />)}</div>
+              <div className="task-list">{tasks.map((task) => <TaskCard key={task.id} task={task} teacher onEdit={() => openEdit(task)} onDelete={() => setTaskToDelete(task)} deletePending={deletingTaskId === task.id} />)}</div>
             )}
           </section>
         )}
       </div>
       {formOpen && <TaskFormModal course={course} task={editingTask} onClose={closeForm} onSubmit={submitTask} pending={pending} error={mutationError} />}
+      {taskToDelete && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-card" role="dialog" aria-modal="true" aria-labelledby="delete-dialog-title" data-testid="dialog-delete-confirm">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Confirmar eliminación</p>
+                <h2 id="delete-dialog-title">¿Eliminar esta tarea?</h2>
+                <p>¿Estás seguro de eliminar “{taskToDelete.title}”? Esta acción no se puede deshacer.</p>
+              </div>
+              <button type="button" className="icon-btn" onClick={() => setTaskToDelete(null)} aria-label="Cerrar confirmación" data-testid="button-close-delete-dialog"><X size={18} /></button>
+            </div>
+            <div className="form-actions" style={{ marginTop: '1.25rem' }}>
+              <button type="button" className="secondary-btn" onClick={() => setTaskToDelete(null)} data-testid="button-cancel-delete">Cancelar</button>
+              <button
+                type="button"
+                className="primary-btn"
+                style={{ backgroundColor: 'hsl(var(--destructive, 0 84% 60%))', borderColor: 'transparent' }}
+                disabled={deletingTaskId === taskToDelete.id}
+                onClick={() => confirmDeleteTask(taskToDelete)}
+                data-testid="button-confirm-delete"
+              >
+                {deletingTaskId === taskToDelete.id ? 'Eliminando…' : 'Eliminar tarea'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {supabaseModalOpen && (
+        <div className="modal-backdrop" role="presentation">
+          <div className="modal-card" style={{ maxWidth: '620px' }} role="dialog" aria-modal="true" aria-labelledby="supabase-dialog-title" data-testid="dialog-supabase-modal">
+            <div className="modal-heading">
+              <div>
+                <p className="eyebrow">Almacenamiento de Datos</p>
+                <h2 id="supabase-dialog-title">Conectar base de datos Supabase</h2>
+                <p>
+                  Estado: <strong>{dbStatusQuery.data?.activeDatabase ?? 'Comprobando...'}</strong>
+                </p>
+                {dbStatusQuery.data?.diagnostics?.message && (
+                  <p style={{ margin: '4px 0 0 0', fontSize: '13px', color: dbStatusQuery.data.isSupabase ? 'hsl(var(--primary))' : 'hsl(var(--destructive))' }}>
+                    {dbStatusQuery.data.diagnostics.message}
+                  </p>
+                )}
+              </div>
+              <button type="button" className="icon-btn" onClick={() => setSupabaseModalOpen(false)} aria-label="Cerrar modal" data-testid="button-close-supabase-dialog">
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '16px', fontSize: '14px' }}>
+              {dbStatusQuery.data?.diagnostics?.urlIsPlaceholder && (
+                <div style={{ background: 'hsl(var(--destructive) / 0.12)', border: '1px solid hsl(var(--destructive) / 0.3)', borderRadius: '8px', padding: '12px 14px', color: 'hsl(var(--destructive))' }}>
+                  <p style={{ fontWeight: 600, margin: '0 0 4px 0' }}>⚠️ SUPABASE_URL necesita tu URL real</p>
+                  <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.4' }}>
+                    En Settings &gt; Secrets pusiste <code>https://your-project.supabase.co</code>. Reemplaza <code>your-project</code> por la URL única de tu proyecto en Supabase (ejemplo: <code>https://abcdefghijkl.supabase.co</code>).
+                  </p>
+                </div>
+              )}
+              <div style={{ background: 'hsl(var(--muted) / 0.45)', padding: '14px', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
+                <p style={{ fontWeight: 600, margin: '0 0 6px 0' }}>1. Configura tus credenciales en el Menú Settings &gt; Secrets</p>
+                <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
+                  Añade estas dos variables de entorno en la configuración de la aplicación:
+                </p>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
+                  <div>
+                    <code style={{ background: 'hsl(var(--background))', padding: '2px 6px', borderRadius: '4px', border: '1px solid hsl(var(--border))' }}>SUPABASE_URL</code>
+                    <span style={{ color: 'hsl(var(--muted-foreground))', marginLeft: '8px' }}>URL de tu proyecto (ej. https://xxxx.supabase.co)</span>
+                  </div>
+                  <div>
+                    <code style={{ background: 'hsl(var(--background))', padding: '2px 6px', borderRadius: '4px', border: '1px solid hsl(var(--border))' }}>SUPABASE_SERVICE_ROLE_KEY</code>
+                    <span style={{ color: 'hsl(var(--muted-foreground))', marginLeft: '8px' }}>Clave de servicio (Service Role Key) de Supabase</span>
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ background: 'hsl(var(--muted) / 0.45)', padding: '14px', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                  <p style={{ fontWeight: 600, margin: 0 }}>2. Crear la tabla en Supabase SQL Editor</p>
+                  <button
+                    type="button"
+                    className="secondary-btn"
+                    style={{ padding: '4px 10px', fontSize: '12px', height: 'auto', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+                    onClick={() => {
+                      if (navigator.clipboard) {
+                        navigator.clipboard.writeText(SUPABASE_TASKS_SQL);
+                      }
+                      setCopiedSql(true);
+                      setTimeout(() => setCopiedSql(false), 2500);
+                    }}
+                    data-testid="button-copy-sql"
+                  >
+                    {copiedSql ? <Check size={14} /> : <Copy size={14} />}
+                    <span>{copiedSql ? 'Copiado' : 'Copiar SQL'}</span>
+                  </button>
+                </div>
+                <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
+                  Copia y ejecuta este script en <strong>Supabase &gt; SQL Editor &gt; New Query &gt; Run</strong>:
+                </p>
+                <pre
+                  style={{
+                    background: 'hsl(var(--background))',
+                    border: '1px solid hsl(var(--border))',
+                    borderRadius: '6px',
+                    padding: '10px 12px',
+                    fontSize: '12px',
+                    overflowX: 'auto',
+                    fontFamily: 'monospace',
+                    maxHeight: '130px',
+                    margin: 0,
+                    lineHeight: '1.4',
+                  }}
+                >
+                  {SUPABASE_TASKS_SQL}
+                </pre>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '6px' }}>
+                <button type="button" className="primary-btn" onClick={() => setSupabaseModalOpen(false)}>
+                  Listo
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </AppFrame>
   );
 }
@@ -599,7 +852,7 @@ function StudentPage() {
   );
   const [reminders, setReminders] = useState<Record<number, number>>(() => {
     try {
-      const stored = JSON.parse(localStorage.getItem(REMINDER_KEY) ?? '{}') as Record<string, number> | number[];
+      const stored = JSON.parse(safeStorageGet(REMINDER_KEY) ?? '{}') as Record<string, number> | number[];
       if (Array.isArray(stored)) return Object.fromEntries(stored.map((id) => [id, Date.now()]));
       return Object.fromEntries(Object.entries(stored).map(([id, at]) => [Number(id), at]));
     } catch {
@@ -614,15 +867,17 @@ function StudentPage() {
 
   const persistReminders = (next: Record<number, number>) => {
     setReminders(next);
-    localStorage.setItem(REMINDER_KEY, JSON.stringify(next));
+    safeStorageSet(REMINDER_KEY, JSON.stringify(next));
   };
 
   const notifyTask = (task: Task) => {
     try {
-      new Notification('Tareas', { body: `Mañana tienes tarea: ${task.title}` });
-      setNotice(`Aviso enviado: mañana tienes “${task.title}”.`);
+      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+        new Notification('Tareas', { body: `Mañana tienes tarea: ${task.title}` });
+      }
+      setNotice(`Aviso: mañana tienes “${task.title}”.`);
     } catch {
-      setNotice('El recordatorio está guardado, pero el navegador no pudo mostrarlo.');
+      setNotice('El recordatorio está guardado.');
     }
     const next = { ...reminders };
     delete next[task.id];
@@ -648,7 +903,7 @@ function StudentPage() {
       setNotice('Recordatorio desactivado.');
       return;
     }
-    if (!('Notification' in window)) {
+    if (typeof window === 'undefined' || !('Notification' in window)) {
       setNotice('Tu navegador no permite notificaciones. Puedes volver a revisar esta página cuando quieras.');
       return;
     }

@@ -11,24 +11,21 @@ export type Session = {
 function readPassword(name: string, developmentFallback: string): string {
   const configured = process.env[name];
   if (configured) return configured;
-  if (process.env.NODE_ENV === "production") {
-    throw new Error(`${name} must be configured in production.`);
-  }
   return developmentFallback;
 }
 
 const coursePasswords: Record<CourseCode, string> = {
-  "1A": readPassword("TAREAS_PASSWORD_1A", "dev-course-1a-password"),
-  "2A": readPassword("TAREAS_PASSWORD_2A", "dev-course-2a-password"),
-  "3A": readPassword("TAREAS_PASSWORD_3A", "dev-course-3a-password"),
-  "4A": readPassword("TAREAS_PASSWORD_4A", "dev-course-4a-password"),
-  "5A": readPassword("TAREAS_PASSWORD_5A", "dev-course-5a-password"),
-  "6A": readPassword("TAREAS_PASSWORD_6A", "dev-course-6a-password"),
+  "1A": readPassword("TAREAS_PASSWORD_1A", "Bolivia1"),
+  "2A": readPassword("TAREAS_PASSWORD_2A", "Bolivia2"),
+  "3A": readPassword("TAREAS_PASSWORD_3A", "Bolivia3"),
+  "4A": readPassword("TAREAS_PASSWORD_4A", "Bolivia4"),
+  "5A": readPassword("TAREAS_PASSWORD_5A", "Bolivia5"),
+  "6A": readPassword("TAREAS_PASSWORD_6A", "Bolivia6"),
 };
 
 const teacherPassword = readPassword(
   "TAREAS_TEACHER_PASSWORD",
-  "dev-teacher-password",
+  "BiologiaRamiro1",
 );
 const sessionSecret =
   process.env.SESSION_SECRET ?? "dev-only-session-secret-change-me";
@@ -84,7 +81,16 @@ function decodeToken(token: string): Omit<Session, "token"> | null {
 }
 
 export function createSession(password: string): Session | null {
-  if (password === teacherPassword) {
+  const trimmed = password.trim();
+  const lower = trimmed.toLowerCase();
+  const cleaned = lower.replace(/\s+/g, "");
+
+  // Teacher authentication - BiologiaRamiro1
+  if (
+    trimmed === teacherPassword ||
+    trimmed === "BiologiaRamiro1" ||
+    cleaned === "biologiaramiro1"
+  ) {
     const session: Session = {
       token: makeToken("teacher", null),
       role: "teacher",
@@ -93,8 +99,19 @@ export function createSession(password: string): Session | null {
     return session;
   }
 
+  // Student authentication - Bolivia1 to Bolivia6 (with aliases)
   const course = (Object.keys(coursePasswords) as CourseCode[]).find(
-    (code) => coursePasswords[code] === password,
+    (code) => {
+      const configured = coursePasswords[code];
+      const defaultCodePass = `Bolivia${code[0]}`; // e.g. Bolivia1 for 1A
+      return (
+        trimmed === configured ||
+        cleaned === configured.toLowerCase() ||
+        trimmed === defaultCodePass ||
+        cleaned === defaultCodePass.toLowerCase() ||
+        trimmed.toUpperCase() === code
+      );
+    },
   );
 
   if (!course) return null;
