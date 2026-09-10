@@ -11,7 +11,7 @@
   ],
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "vite build --config artifacts/tareas/vite.config.ts && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --sourcemap --outfile=dist/server.cjs",
+    "build": "vite build --config artifacts/tareas/vite.config.ts && esbuild server.ts --bundle --platform=node --format=cjs --packages=external --alias:@workspace/api-zod=./lib/api-zod/src/index.ts --alias:@workspace/db=./lib/db/src/index.ts --sourcemap --outfile=dist/server.cjs",
     "start": "node dist/server.cjs",
     "typecheck": "tsc --build",
     "lint": "tsc --build"

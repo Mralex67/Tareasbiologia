@@ -4,16 +4,21 @@ import {
   Bell,
   BellRing,
   BookOpen,
+  Calendar,
   CalendarDays,
   Check,
   ChevronRight,
   CircleAlert,
   ClipboardList,
+  Clock,
   Copy,
   Database,
+  Download,
+  ExternalLink,
   FilePenLine,
   GraduationCap,
   LogOut,
+  MessageCircle,
   Plus,
   Sparkles,
   Trash2,
@@ -21,8 +26,11 @@ import {
   X,
 } from 'lucide-react';
 import {
+  getClientSupabaseConfig,
   getGetCurrentSessionQueryKey,
   getListTasksQueryKey,
+  normalizeSupabaseUrl,
+  saveClientSupabaseConfig,
   setAuthTokenGetter,
   useCreateTask,
   useDeleteTask,
@@ -37,6 +45,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import NotFound from '@/pages/not-found';
 import { Route, Switch, useLocation, Router as WouterRouter } from 'wouter';
+import { useHashLocation } from 'wouter/use-hash-location';
 
 const queryClient = new QueryClient();
 const SESSION_KEY = 'tareas.auth-session';
@@ -483,17 +492,407 @@ function TaskCard({
       <div className="task-actions">
         {teacher ? (
           <>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={() => openGoogleCalendarReminder(task)}
+              title="📅 Agendar directo en Google Calendar a las 8:00 PM"
+              aria-label={`Google Calendar para ${task.title}`}
+              data-testid={`button-gcal-direct-${task.id}`}
+            >
+              <Calendar size={17} />
+            </button>
+            <button
+              type="button"
+              className="icon-btn"
+              onClick={onReminder}
+              title="Opciones de recordatorio (Calendario, Celular, WhatsApp)"
+              aria-label={`Recordatorio para ${task.title}`}
+              data-testid={`button-reminder-task-${task.id}`}
+            >
+              <Bell size={17} />
+            </button>
             <button type="button" className="icon-btn" onClick={onEdit} aria-label={`Editar ${task.title}`} data-testid={`button-edit-task-${task.id}`}><FilePenLine size={17} /></button>
             <button type="button" className="icon-btn" onClick={onDelete} disabled={deletePending} aria-label={`Eliminar ${task.title}`} data-testid={`button-delete-task-${task.id}`}><Trash2 size={17} /></button>
           </>
         ) : (
-          <button type="button" className={`reminder-btn ${reminderActive ? 'active' : ''}`} onClick={onReminder} data-testid={`button-reminder-task-${task.id}`}>
-            {reminderActive ? <BellRing size={14} /> : <Bell size={14} />}
-            {reminderActive ? 'Recordatorio activo' : 'Recordarme'}
-          </button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={() => openGoogleCalendarReminder(task)}
+              title="Agendar en Google Calendar con alarma a las 8:00 PM"
+              data-testid={`button-gcal-student-${task.id}`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 12px',
+                fontSize: '13px',
+                fontWeight: 600,
+                borderRadius: '8px',
+              }}
+            >
+              <Calendar size={14} color="hsl(var(--primary))" />
+              <span>Google Calendar</span>
+            </button>
+            <button
+              type="button"
+              className={`reminder-btn ${reminderActive ? 'active' : ''}`}
+              onClick={onReminder}
+              data-testid={`button-reminder-task-${task.id}`}
+              title="Más opciones de recordatorio (Celular, WhatsApp)"
+            >
+              {reminderActive ? <BellRing size={14} /> : <Bell size={14} />}
+              <span>{reminderActive ? 'Alarma activa' : 'Opciones'}</span>
+            </button>
+          </div>
         )}
       </div>
     </article>
+  );
+}
+
+function getReminder8PM(dueAtIso: string): { start: Date; end: Date; formattedStr: string; isPast: boolean } {
+  const due = new Date(dueAtIso);
+  const reminder = new Date(due);
+  reminder.setDate(reminder.getDate() - 1);
+  reminder.setHours(20, 0, 0, 0);
+
+  const end = new Date(reminder.getTime() + 30 * 60 * 1000);
+  const isPast = reminder.getTime() < Date.now();
+
+  const formattedStr = reminder.toLocaleDateString('es-ES', {
+    weekday: 'long',
+    day: 'numeric',
+    month: 'long',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
+
+  return { start: reminder, end, formattedStr, isPast };
+}
+
+function openGoogleCalendarReminder(task: Task) {
+  const { start, end } = getReminder8PM(task.dueAt);
+  const formatDateGCal = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const title = encodeURIComponent(`🚨 ¡Tienes Tarea Individuo! Mañana vence: ${task.title}`);
+  const details = encodeURIComponent(
+    `⏰ RECORDATORIO DE LAS 8:00 PM\n` +
+    `¡Tienes tarea, individuo! Mañana se entrega:\n\n` +
+    `📚 Curso: ${task.course}\n` +
+    `📌 Tarea: ${task.title}\n` +
+    (task.description ? `📝 Indicaciones: ${task.description}\n` : '') +
+    `📅 Fecha de entrega: ${formatDue(task.dueAt)}\n\n` +
+    `¡Termínala hoy para no desvelarte ni entregarla a las carreras!`
+  );
+  const dates = `${formatDateGCal(start)}/${formatDateGCal(end)}`;
+  const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}`;
+  window.open(url, '_blank', 'noopener,noreferrer');
+}
+
+function downloadIcsReminder(task: Task) {
+  const { start, end } = getReminder8PM(task.dueAt);
+  const formatDateIcs = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
+  const title = `🚨 ¡Tienes Tarea Individuo! Mañana: ${task.title}`;
+  const description = `RECORDATORIO DE LAS 8:00 PM\\n¡Tienes tarea, individuo! Mañana vence:\\n- Curso: ${task.course}\\n- Tarea: ${task.title}\\n- Entrega: ${formatDue(task.dueAt)}`;
+
+  const icsLines = [
+    'BEGIN:VCALENDAR',
+    'VERSION:2.0',
+    'PRODID:-//Tareas//Recordatorio Escolar//ES',
+    'CALSCALE:GREGORIAN',
+    'BEGIN:VEVENT',
+    `UID:tarea-${task.id}-${Date.now()}@tareas-web`,
+    `DTSTAMP:${formatDateIcs(new Date())}`,
+    `DTSTART:${formatDateIcs(start)}`,
+    `DTEND:${formatDateIcs(end)}`,
+    `SUMMARY:${title}`,
+    `DESCRIPTION:${description}`,
+    'BEGIN:VALARM',
+    'ACTION:DISPLAY',
+    `DESCRIPTION:🚨 ¡Tienes Tarea Individuo! Mañana vence: ${task.title}`,
+    'TRIGGER:-PT0M',
+    'END:VALARM',
+    'END:VEVENT',
+    'END:VCALENDAR',
+  ];
+
+  const blob = new Blob([icsLines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.setAttribute('download', `recordatorio-8pm-tarea-${task.id}.ics`);
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+function shareWhatsAppReminder(task: Task) {
+  const text = encodeURIComponent(
+    `🚨 *¡Tienes Tarea, Individuo!* 🚨\n\n` +
+    `⏰ *Recordatorio de las 8:00 PM:*\n` +
+    `Mañana toca entregar:\n` +
+    `📌 *Curso:* ${task.course}\n` +
+    `📚 *Tarea:* ${task.title}\n` +
+    (task.description ? `📝 *Indicaciones:* ${task.description}\n` : '') +
+    `📅 *Fecha de entrega:* ${formatDue(task.dueAt)}\n\n` +
+    `⚡ _¡No lo dejes para mañana en la mañana!_`
+  );
+  window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank', 'noopener,noreferrer');
+}
+
+function ReminderModal({
+  task,
+  onClose,
+  browserReminderActive = false,
+  onToggleBrowserReminder,
+}: {
+  task: Task;
+  onClose: () => void;
+  browserReminderActive?: boolean;
+  onToggleBrowserReminder?: () => void;
+}) {
+  const { formattedStr, isPast } = getReminder8PM(task.dueAt);
+  const [downloadedIcs, setDownloadedIcs] = useState(false);
+
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div
+        className="modal-card"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="reminder-modal-title"
+        data-testid="dialog-reminder-modal"
+        style={{ maxWidth: '520px' }}
+      >
+        <div className="modal-heading">
+          <div>
+            <p className="eyebrow" style={{ color: 'hsl(var(--primary))' }}>
+              Alarma de las 8:00 PM · Curso {task.course}
+            </p>
+            <h2 id="reminder-modal-title" style={{ fontSize: '24px' }}>
+              ¡Tienes Tarea, Individuo!
+            </h2>
+            <p>
+              Programa una alarma en tu calendario el día anterior a las 8:00 PM para que no se te olvide.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={onClose}
+            aria-label="Cerrar modal"
+            data-testid="button-close-reminder-modal"
+          >
+            <X size={18} />
+          </button>
+        </div>
+
+        <div
+          style={{
+            background: 'hsl(var(--muted) / 0.5)',
+            border: '1px solid hsl(var(--border))',
+            borderRadius: '12px',
+            padding: '14px 16px',
+            marginBottom: '20px',
+            fontSize: '13px',
+            lineHeight: 1.5,
+          }}
+        >
+          <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--foreground))', marginBottom: '4px' }}>
+            📌 {task.title}
+          </div>
+          {task.description && (
+            <div style={{ color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}>
+              {task.description}
+            </div>
+          )}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '8px', borderTop: '1px solid hsl(var(--border))' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'hsl(var(--foreground))' }}>
+              <Clock size={14} style={{ color: 'hsl(var(--primary))' }} />
+              <strong>Hora de la alarma:</strong>
+              <span>{formattedStr}</span>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'hsl(var(--muted-foreground))' }}>
+              <CalendarDays size={14} />
+              <span>Entrega final: {formatDue(task.dueAt)}</span>
+            </div>
+            {isPast && (
+              <p style={{ margin: '4px 0 0', color: 'hsl(38 92% 45%)', fontSize: '12px', fontWeight: 500 }}>
+                ⚠️ La hora de las 8:00 PM del día previo ya pasó para esta entrega, pero aún puedes agendar el evento en tu calendario.
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => openGoogleCalendarReminder(task)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderRadius: '12px',
+              textAlign: 'left',
+              width: '100%',
+            }}
+            data-testid="button-gcal-reminder"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                background: 'hsl(217 91% 60% / 0.15)',
+                color: 'hsl(217 91% 60%)',
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                display: 'grid',
+                placeItems: 'center',
+              }}>
+                <Calendar size={20} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>Google Calendar</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
+                  Abre en tu app con alarma y notificación a las 8:00 PM
+                </div>
+              </div>
+            </div>
+            <ExternalLink size={16} style={{ color: 'hsl(var(--muted-foreground))' }} />
+          </button>
+
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => {
+              downloadIcsReminder(task);
+              setDownloadedIcs(true);
+            }}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderRadius: '12px',
+              textAlign: 'left',
+              width: '100%',
+            }}
+            data-testid="button-ics-reminder"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                background: 'hsl(142 71% 45% / 0.15)',
+                color: 'hsl(142 71% 45%)',
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                display: 'grid',
+                placeItems: 'center',
+              }}>
+                <Download size={20} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                  {downloadedIcs ? '¡Archivo descargado! Ábrelo en tu teléfono' : 'Apple Calendar / Celular (.ics)'}
+                </div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
+                  Para iPhone, iPad, Android y app de Calendario nativa
+                </div>
+              </div>
+            </div>
+            {downloadedIcs ? <Check size={16} style={{ color: 'hsl(142 71% 45%)' }} /> : <Download size={16} style={{ color: 'hsl(var(--muted-foreground))' }} />}
+          </button>
+
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => shareWhatsAppReminder(task)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              padding: '12px 16px',
+              borderRadius: '12px',
+              textAlign: 'left',
+              width: '100%',
+            }}
+            data-testid="button-whatsapp-reminder"
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+              <div style={{
+                background: 'hsl(142 70% 49% / 0.15)',
+                color: 'hsl(142 70% 39%)',
+                width: '36px',
+                height: '36px',
+                borderRadius: '8px',
+                display: 'grid',
+                placeItems: 'center',
+              }}>
+                <MessageCircle size={20} />
+              </div>
+              <div>
+                <div style={{ fontWeight: 600, fontSize: '14px' }}>Compartir a WhatsApp</div>
+                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
+                  Enviar aviso listo al grupo del salón o a tu chat personal
+                </div>
+              </div>
+            </div>
+            <ExternalLink size={16} style={{ color: 'hsl(var(--muted-foreground))' }} />
+          </button>
+
+          {onToggleBrowserReminder && (
+            <button
+              type="button"
+              className="secondary-btn"
+              onClick={onToggleBrowserReminder}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                padding: '12px 16px',
+                borderRadius: '12px',
+                textAlign: 'left',
+                width: '100%',
+              }}
+              data-testid="button-browser-reminder"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                <div style={{
+                  background: browserReminderActive ? 'hsl(var(--primary) / 0.15)' : 'hsl(var(--muted))',
+                  color: browserReminderActive ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '8px',
+                  display: 'grid',
+                  placeItems: 'center',
+                }}>
+                  {browserReminderActive ? <BellRing size={20} /> : <Bell size={20} />}
+                </div>
+                <div>
+                  <div style={{ fontWeight: 600, fontSize: '14px' }}>
+                    {browserReminderActive ? 'Recordatorio web activo' : 'Aviso en este navegador'}
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
+                    Notificación si tienes la pestaña de la web abierta
+                  </div>
+                </div>
+              </div>
+              {browserReminderActive ? <Check size={16} style={{ color: 'hsl(var(--primary))' }} /> : null}
+            </button>
+          )}
+        </div>
+
+        <div className="form-actions" style={{ marginTop: '20px' }}>
+          <button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-reminder">
+            Entendido
+          </button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -574,8 +973,14 @@ create table if not exists public.tasks (
 create index if not exists tasks_course_due_at_idx
   on public.tasks (course, due_at);
 
--- Habilitar permisos de lectura y escritura
-alter table public.tasks disable row level security;`;
+-- Activar RLS con permisos abiertos para la app (se muestra en verde en Supabase)
+alter table public.tasks enable row level security;
+
+drop policy if exists "Permitir acceso web anonimo" on public.tasks;
+create policy "Permitir acceso web anonimo"
+  on public.tasks for all
+  using (true)
+  with check (true);`;
 
 function TeacherPage() {
   const [, setLocation] = useLocation();
@@ -586,29 +991,39 @@ function TeacherPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
+  const [teacherReminderTask, setTeacherReminderTask] = useState<Task | null>(null);
   const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
+  const [sbUrlInput, setSbUrlInput] = useState(() => getClientSupabaseConfig()?.url ?? '');
+  const [sbAnonKeyInput, setSbAnonKeyInput] = useState(() => getClientSupabaseConfig()?.anonKey ?? '');
+  const [sbStatusMsg, setSbStatusMsg] = useState<{ type: 'success' | 'error' | 'info'; text: string } | null>(null);
+  const [testingSb, setTestingSb] = useState(false);
 
   const dbStatusQuery = useQuery({
     queryKey: ['db-status'],
     queryFn: async () => {
+      const clientConfig = getClientSupabaseConfig();
       try {
         const res = await fetch('/api/db-status');
-        if (!res.ok) throw new Error('Status request failed');
-        return (await res.json()) as {
-          activeDatabase: string;
-          isSupabase: boolean;
-          isPartial: boolean;
-          diagnostics?: { message: string; isReady: boolean; urlIsPlaceholder: boolean };
-        };
-      } catch {
+        if (res.ok) {
+          const data = await res.json();
+          if (data && (data.isSupabase || !clientConfig)) return data;
+        }
+      } catch {}
+      if (clientConfig) {
         return {
-          activeDatabase: 'En memoria (Local)',
-          isSupabase: false,
+          activeDatabase: 'Supabase (Nube)',
+          isSupabase: true,
           isPartial: false,
-          diagnostics: { message: 'Operando localmente.', isReady: false, urlIsPlaceholder: false },
+          diagnostics: { message: 'Conectado a la base de datos Supabase en la nube.', isReady: true, urlIsPlaceholder: false },
         };
       }
+      return {
+        activeDatabase: 'En memoria (Local)',
+        isSupabase: false,
+        isPartial: false,
+        diagnostics: { message: 'Operando localmente.', isReady: false, urlIsPlaceholder: false },
+      };
     },
   });
 
@@ -633,6 +1048,71 @@ function TeacherPage() {
   const openNew = () => { setEditingTask(null); setFormOpen(true); };
   const openEdit = (task: Task) => { setEditingTask(task); setFormOpen(true); };
   const closeForm = () => { setFormOpen(false); setEditingTask(null); };
+
+  const handleSaveSupabase = async () => {
+    let url = sbUrlInput.trim();
+    const anonKey = sbAnonKeyInput.trim();
+    if (!url || !anonKey) {
+      setSbStatusMsg({ type: 'error', text: 'Por favor ingresa la Project URL y la Anon Key de Supabase.' });
+      return;
+    }
+
+    const cleanUrl = normalizeSupabaseUrl(url);
+    setSbUrlInput(cleanUrl);
+
+    setTestingSb(true);
+    setSbStatusMsg(null);
+    try {
+      const testRes = await fetch(`${cleanUrl}/rest/v1/tasks?select=id&limit=1`, {
+        headers: { apikey: anonKey, Authorization: `Bearer ${anonKey}` },
+      });
+      if (!testRes.ok) {
+        let detail = '';
+        try {
+          const json = await testRes.json();
+          detail = json.message || json.hint || JSON.stringify(json);
+        } catch {
+          detail = await testRes.text().catch(() => '');
+        }
+
+        if (testRes.status === 401 || testRes.status === 403) {
+          throw new Error(`La Anon Key fue rechazada (Error ${testRes.status}). Asegúrate de copiar la clave 'anon' 'public' en Project Settings > API.`);
+        }
+
+        if (testRes.status === 404 && detail.toLowerCase().includes('tasks')) {
+          saveClientSupabaseConfig({ url: cleanUrl, anonKey });
+          setSbStatusMsg({
+            type: 'info',
+            text: 'Conectó a Supabase. Como la tabla se acaba de crear, el caché de la API puede tardar unos segundos. Espera un momento y presiona "Conectar y Guardar" de nuevo.',
+          });
+          client.invalidateQueries({ queryKey: ['db-status'] });
+          invalidate();
+          return;
+        }
+
+        throw new Error(`Error ${testRes.status}: ${detail || testRes.statusText}`);
+      }
+
+      saveClientSupabaseConfig({ url: cleanUrl, anonKey });
+      setSbStatusMsg({ type: 'success', text: '¡Conectado exitosamente con tu base de datos Supabase en la nube!' });
+      client.invalidateQueries({ queryKey: ['db-status'] });
+      invalidate();
+    } catch (err: any) {
+      setSbStatusMsg({ type: 'error', text: `No se pudo conectar: ${err?.message || 'Verifica la URL y la Anon Key'}` });
+    } finally {
+      setTestingSb(false);
+    }
+  };
+
+  const handleDisconnectSupabase = () => {
+    saveClientSupabaseConfig(null);
+    setSbUrlInput('');
+    setSbAnonKeyInput('');
+    setSbStatusMsg({ type: 'info', text: 'Supabase desconectado. Usando almacenamiento local.' });
+    client.invalidateQueries({ queryKey: ['db-status'] });
+    invalidate();
+  };
+
   const submitTask = (input: TaskInput) => {
     if (editingTask) {
       updateTask.mutate({ id: editingTask.id, data: input }, { onSuccess: () => { invalidate(); closeForm(); } });
@@ -707,7 +1187,19 @@ function TeacherPage() {
             </div>
             {deleteTask.isError && <p className="error-note" style={{ padding: '13px 20px 0' }} data-testid="status-delete-error">{errorMessage(deleteTask.error, 'No pudimos eliminar la tarea.')}</p>}
             {taskQuery.isLoading ? <TaskSkeleton /> : tasks.length === 0 ? <EmptyTasks /> : (
-              <div className="task-list">{tasks.map((task) => <TaskCard key={task.id} task={task} teacher onEdit={() => openEdit(task)} onDelete={() => setTaskToDelete(task)} deletePending={deletingTaskId === task.id} />)}</div>
+              <div className="task-list">
+                {tasks.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    teacher
+                    onEdit={() => openEdit(task)}
+                    onDelete={() => setTaskToDelete(task)}
+                    deletePending={deletingTaskId === task.id}
+                    onReminder={() => setTeacherReminderTask(task)}
+                  />
+                ))}
+              </div>
             )}
           </section>
         )}
@@ -762,31 +1254,99 @@ function TeacherPage() {
             </div>
 
             <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', marginTop: '16px', fontSize: '14px' }}>
-              {dbStatusQuery.data?.diagnostics?.urlIsPlaceholder && (
-                <div style={{ background: 'hsl(var(--destructive) / 0.12)', border: '1px solid hsl(var(--destructive) / 0.3)', borderRadius: '8px', padding: '12px 14px', color: 'hsl(var(--destructive))' }}>
-                  <p style={{ fontWeight: 600, margin: '0 0 4px 0' }}>⚠️ SUPABASE_URL necesita tu URL real</p>
-                  <p style={{ margin: 0, fontSize: '13px', lineHeight: '1.4' }}>
-                    En Settings &gt; Secrets pusiste <code>https://your-project.supabase.co</code>. Reemplaza <code>your-project</code> por la URL única de tu proyecto en Supabase (ejemplo: <code>https://abcdefghijkl.supabase.co</code>).
-                  </p>
-                </div>
-              )}
+              {/* Sección 1: Conexión directa en la aplicación */}
               <div style={{ background: 'hsl(var(--muted) / 0.45)', padding: '14px', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
-                <p style={{ fontWeight: 600, margin: '0 0 6px 0' }}>1. Configura tus credenciales en el Menú Settings &gt; Secrets</p>
-                <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
-                  Añade estas dos variables de entorno en la configuración de la aplicación:
+                <p style={{ fontWeight: 600, margin: '0 0 6px 0' }}>1. Conectar tu proyecto de Supabase</p>
+                <p style={{ margin: '0 0 10px 0', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
+                  Ingresa las credenciales de tu proyecto de Supabase (las encuentras en <strong>Project Settings &gt; API</strong>):
                 </p>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px' }}>
-                  <div>
-                    <code style={{ background: 'hsl(var(--background))', padding: '2px 6px', borderRadius: '4px', border: '1px solid hsl(var(--border))' }}>SUPABASE_URL</code>
-                    <span style={{ color: 'hsl(var(--muted-foreground))', marginLeft: '8px' }}>URL de tu proyecto (ej. https://xxxx.supabase.co)</span>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  <div className="form-row" style={{ margin: 0 }}>
+                    <label className="field-label" htmlFor="supabase-url" style={{ fontSize: '12px' }}>
+                      Project URL
+                    </label>
+                    <input
+                      id="supabase-url"
+                      className="field"
+                      style={{ fontSize: '13px', padding: '6px 10px', height: '36px' }}
+                      value={sbUrlInput}
+                      onChange={(e) => setSbUrlInput(e.target.value)}
+                      placeholder="https://xxxxxxxxxxxx.supabase.co"
+                      data-testid="input-supabase-url"
+                    />
                   </div>
-                  <div>
-                    <code style={{ background: 'hsl(var(--background))', padding: '2px 6px', borderRadius: '4px', border: '1px solid hsl(var(--border))' }}>SUPABASE_SERVICE_ROLE_KEY</code>
-                    <span style={{ color: 'hsl(var(--muted-foreground))', marginLeft: '8px' }}>Clave de servicio (Service Role Key) de Supabase</span>
+
+                  <div className="form-row" style={{ margin: 0 }}>
+                    <label className="field-label" htmlFor="supabase-anon-key" style={{ fontSize: '12px' }}>
+                      API Key pública (anon key)
+                    </label>
+                    <input
+                      id="supabase-anon-key"
+                      className="field"
+                      type="password"
+                      style={{ fontSize: '13px', padding: '6px 10px', height: '36px' }}
+                      value={sbAnonKeyInput}
+                      onChange={(e) => setSbAnonKeyInput(e.target.value)}
+                      placeholder="eyJhbGciOiJIUzI1NiIsInR5cCI6..."
+                      data-testid="input-supabase-key"
+                    />
+                  </div>
+
+                  {sbStatusMsg && (
+                    <div
+                      style={{
+                        padding: '8px 12px',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        lineHeight: '1.4',
+                        background:
+                          sbStatusMsg.type === 'success'
+                            ? 'hsl(142 76% 36% / 0.15)'
+                            : sbStatusMsg.type === 'error'
+                            ? 'hsl(var(--destructive) / 0.15)'
+                            : 'hsl(217 91% 60% / 0.15)',
+                        color:
+                          sbStatusMsg.type === 'success'
+                            ? 'hsl(142 76% 36%)'
+                            : sbStatusMsg.type === 'error'
+                            ? 'hsl(var(--destructive))'
+                            : 'hsl(217 91% 60%)',
+                        border: '1px solid currentColor',
+                      }}
+                      data-testid="status-supabase-message"
+                    >
+                      {sbStatusMsg.text}
+                    </div>
+                  )}
+
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                    <button
+                      type="button"
+                      className="primary-btn"
+                      style={{ height: '34px', fontSize: '13px', padding: '0 14px' }}
+                      disabled={testingSb}
+                      onClick={handleSaveSupabase}
+                      data-testid="button-connect-supabase"
+                    >
+                      {testingSb ? 'Comprobando conexión…' : 'Conectar y Guardar'}
+                    </button>
+                    {(Boolean(sbUrlInput) || dbStatusQuery.data?.isSupabase) && (
+                      <button
+                        type="button"
+                        className="secondary-btn"
+                        style={{ height: '34px', fontSize: '13px', padding: '0 12px' }}
+                        onClick={handleDisconnectSupabase}
+                        data-testid="button-disconnect-supabase"
+                      >
+                        Desconectar
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
 
+              {/* Sección 2: Script SQL */}
               <div style={{ background: 'hsl(var(--muted) / 0.45)', padding: '14px', borderRadius: '8px', border: '1px solid hsl(var(--border))' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
                   <p style={{ fontWeight: 600, margin: 0 }}>2. Crear la tabla en Supabase SQL Editor</p>
@@ -808,7 +1368,7 @@ function TeacherPage() {
                   </button>
                 </div>
                 <p style={{ margin: '0 0 8px 0', fontSize: '13px', color: 'hsl(var(--muted-foreground))' }}>
-                  Copia y ejecuta este script en <strong>Supabase &gt; SQL Editor &gt; New Query &gt; Run</strong>:
+                  Copia y ejecuta este script en <strong>Supabase &gt; SQL Editor &gt; New Query &gt; Run</strong> para crear la tabla de tareas:
                 </p>
                 <pre
                   style={{
@@ -819,7 +1379,7 @@ function TeacherPage() {
                     fontSize: '12px',
                     overflowX: 'auto',
                     fontFamily: 'monospace',
-                    maxHeight: '130px',
+                    maxHeight: '120px',
                     margin: 0,
                     lineHeight: '1.4',
                   }}
@@ -836,6 +1396,9 @@ function TeacherPage() {
             </div>
           </div>
         </div>
+      )}
+      {teacherReminderTask && (
+        <ReminderModal task={teacherReminderTask} onClose={() => setTeacherReminderTask(null)} />
       )}
     </AppFrame>
   );
@@ -860,6 +1423,7 @@ function StudentPage() {
     }
   });
   const [notice, setNotice] = useState<string | null>(null);
+  const [selectedReminderTask, setSelectedReminderTask] = useState<Task | null>(null);
 
   useEffect(() => {
     if (!sessionQuery.isLoading && (!session || session.role !== 'student')) setLocation('/');
@@ -943,11 +1507,28 @@ function StudentPage() {
               <BookOpen size={22} color="hsl(var(--primary))" />
             </div>
             {taskQuery.isLoading ? <TaskSkeleton /> : (taskQuery.data?.length ?? 0) === 0 ? <EmptyTasks student /> : (
-              <div className="task-list">{taskQuery.data?.map((task) => <TaskCard key={task.id} task={task} reminderActive={Boolean(reminders[task.id])} onReminder={() => toggleReminder(task)} />)}</div>
+              <div className="task-list">
+                {taskQuery.data?.map((task) => (
+                  <TaskCard
+                    key={task.id}
+                    task={task}
+                    reminderActive={Boolean(reminders[task.id])}
+                    onReminder={() => setSelectedReminderTask(task)}
+                  />
+                ))}
+              </div>
             )}
           </section>
         )}
       </div>
+      {selectedReminderTask && (
+        <ReminderModal
+          task={selectedReminderTask}
+          onClose={() => setSelectedReminderTask(null)}
+          browserReminderActive={Boolean(reminders[selectedReminderTask.id])}
+          onToggleBrowserReminder={() => toggleReminder(selectedReminderTask)}
+        />
+      )}
     </AppFrame>
   );
 }
@@ -969,7 +1550,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, '')}>
+        <WouterRouter hook={useHashLocation}>
           <Router />
         </WouterRouter>
         <Toaster />
