@@ -1,8 +1,6 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from 'react';
 import { QueryClient, QueryClientProvider, useQueryClient, useQuery } from '@tanstack/react-query';
 import {
-  Bell,
-  BellRing,
   BookOpen,
   Calendar,
   CalendarDays,
@@ -13,12 +11,9 @@ import {
   Clock,
   Copy,
   Database,
-  Download,
-  ExternalLink,
   FilePenLine,
   GraduationCap,
   LogOut,
-  MessageCircle,
   Plus,
   Sparkles,
   Trash2,
@@ -49,7 +44,6 @@ import { useHashLocation } from 'wouter/use-hash-location';
 
 const queryClient = new QueryClient();
 const SESSION_KEY = 'tareas.auth-session';
-const REMINDER_KEY = 'tareas.reminders';
 const COURSES: CourseCode[] = ['1A', '2A', '3A', '4A', '5A', '6A'];
 
 const memoryStore: Record<string, string> = {};
@@ -466,16 +460,12 @@ function TaskCard({
   onEdit,
   onDelete,
   deletePending,
-  reminderActive,
-  onReminder,
 }: {
   task: Task;
   teacher?: boolean;
   onEdit?: () => void;
   onDelete?: () => void;
   deletePending?: boolean;
-  reminderActive?: boolean;
-  onReminder?: () => void;
 }) {
   const overdue = isOverdue(task.dueAt);
   return (
@@ -496,57 +486,36 @@ function TaskCard({
               type="button"
               className="icon-btn"
               onClick={() => openGoogleCalendarReminder(task)}
-              title="📅 Agendar directo en Google Calendar a las 8:00 PM"
+              title="📅 Agendar en Google Calendar (Recordatorio 8:00 PM)"
               aria-label={`Google Calendar para ${task.title}`}
               data-testid={`button-gcal-direct-${task.id}`}
             >
               <Calendar size={17} />
             </button>
-            <button
-              type="button"
-              className="icon-btn"
-              onClick={onReminder}
-              title="Opciones de recordatorio (Calendario, Celular, WhatsApp)"
-              aria-label={`Recordatorio para ${task.title}`}
-              data-testid={`button-reminder-task-${task.id}`}
-            >
-              <Bell size={17} />
-            </button>
             <button type="button" className="icon-btn" onClick={onEdit} aria-label={`Editar ${task.title}`} data-testid={`button-edit-task-${task.id}`}><FilePenLine size={17} /></button>
             <button type="button" className="icon-btn" onClick={onDelete} disabled={deletePending} aria-label={`Eliminar ${task.title}`} data-testid={`button-delete-task-${task.id}`}><Trash2 size={17} /></button>
           </>
         ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={() => openGoogleCalendarReminder(task)}
-              title="Agendar en Google Calendar con alarma a las 8:00 PM"
-              data-testid={`button-gcal-student-${task.id}`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                fontSize: '13px',
-                fontWeight: 600,
-                borderRadius: '8px',
-              }}
-            >
-              <Calendar size={14} color="hsl(var(--primary))" />
-              <span>Google Calendar</span>
-            </button>
-            <button
-              type="button"
-              className={`reminder-btn ${reminderActive ? 'active' : ''}`}
-              onClick={onReminder}
-              data-testid={`button-reminder-task-${task.id}`}
-              title="Más opciones de recordatorio (Celular, WhatsApp)"
-            >
-              {reminderActive ? <BellRing size={14} /> : <Bell size={14} />}
-              <span>{reminderActive ? 'Alarma activa' : 'Opciones'}</span>
-            </button>
-          </div>
+          <button
+            type="button"
+            className="secondary-btn"
+            onClick={() => openGoogleCalendarReminder(task)}
+            title="Agendar en Google Calendar con recordatorio a las 8:00 PM"
+            aria-label={`Agendar ${task.title} en Google Calendar`}
+            data-testid={`button-gcal-student-${task.id}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '6px',
+              padding: '6px 14px',
+              fontSize: '13px',
+              fontWeight: 600,
+              borderRadius: '8px',
+            }}
+          >
+            <Calendar size={14} color="hsl(var(--primary))" />
+            <span>Google Calendar</span>
+          </button>
         )}
       </div>
     </article>
@@ -589,311 +558,6 @@ function openGoogleCalendarReminder(task: Task) {
   const dates = `${formatDateGCal(start)}/${formatDateGCal(end)}`;
   const url = `https://calendar.google.com/calendar/render?action=TEMPLATE&text=${title}&details=${details}&dates=${dates}`;
   window.open(url, '_blank', 'noopener,noreferrer');
-}
-
-function downloadIcsReminder(task: Task) {
-  const { start, end } = getReminder8PM(task.dueAt);
-  const formatDateIcs = (d: Date) => d.toISOString().replace(/[-:]/g, '').split('.')[0] + 'Z';
-  const title = `🚨 ¡Tienes Tarea Individuo! Mañana: ${task.title}`;
-  const description = `RECORDATORIO DE LAS 8:00 PM\\n¡Tienes tarea, individuo! Mañana vence:\\n- Curso: ${task.course}\\n- Tarea: ${task.title}\\n- Entrega: ${formatDue(task.dueAt)}`;
-
-  const icsLines = [
-    'BEGIN:VCALENDAR',
-    'VERSION:2.0',
-    'PRODID:-//Tareas//Recordatorio Escolar//ES',
-    'CALSCALE:GREGORIAN',
-    'BEGIN:VEVENT',
-    `UID:tarea-${task.id}-${Date.now()}@tareas-web`,
-    `DTSTAMP:${formatDateIcs(new Date())}`,
-    `DTSTART:${formatDateIcs(start)}`,
-    `DTEND:${formatDateIcs(end)}`,
-    `SUMMARY:${title}`,
-    `DESCRIPTION:${description}`,
-    'BEGIN:VALARM',
-    'ACTION:DISPLAY',
-    `DESCRIPTION:🚨 ¡Tienes Tarea Individuo! Mañana vence: ${task.title}`,
-    'TRIGGER:-PT0M',
-    'END:VALARM',
-    'END:VEVENT',
-    'END:VCALENDAR',
-  ];
-
-  const blob = new Blob([icsLines.join('\r\n')], { type: 'text/calendar;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement('a');
-  link.href = url;
-  link.setAttribute('download', `recordatorio-8pm-tarea-${task.id}.ics`);
-  document.body.appendChild(link);
-  link.click();
-  document.body.removeChild(link);
-  URL.revokeObjectURL(url);
-}
-
-function shareWhatsAppReminder(task: Task) {
-  const text = encodeURIComponent(
-    `🚨 *¡Tienes Tarea, Individuo!* 🚨\n\n` +
-    `⏰ *Recordatorio de las 8:00 PM:*\n` +
-    `Mañana toca entregar:\n` +
-    `📌 *Curso:* ${task.course}\n` +
-    `📚 *Tarea:* ${task.title}\n` +
-    (task.description ? `📝 *Indicaciones:* ${task.description}\n` : '') +
-    `📅 *Fecha de entrega:* ${formatDue(task.dueAt)}\n\n` +
-    `⚡ _¡No lo dejes para mañana en la mañana!_`
-  );
-  window.open(`https://api.whatsapp.com/send?text=${text}`, '_blank', 'noopener,noreferrer');
-}
-
-function ReminderModal({
-  task,
-  onClose,
-  browserReminderActive = false,
-  onToggleBrowserReminder,
-}: {
-  task: Task;
-  onClose: () => void;
-  browserReminderActive?: boolean;
-  onToggleBrowserReminder?: () => void;
-}) {
-  const { formattedStr, isPast } = getReminder8PM(task.dueAt);
-  const [downloadedIcs, setDownloadedIcs] = useState(false);
-
-  return (
-    <div className="modal-backdrop" role="presentation">
-      <div
-        className="modal-card"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="reminder-modal-title"
-        data-testid="dialog-reminder-modal"
-        style={{ maxWidth: '520px' }}
-      >
-        <div className="modal-heading">
-          <div>
-            <p className="eyebrow" style={{ color: 'hsl(var(--primary))' }}>
-              Alarma de las 8:00 PM · Curso {task.course}
-            </p>
-            <h2 id="reminder-modal-title" style={{ fontSize: '24px' }}>
-              ¡Tienes Tarea, Individuo!
-            </h2>
-            <p>
-              Programa una alarma en tu calendario el día anterior a las 8:00 PM para que no se te olvide.
-            </p>
-          </div>
-          <button
-            type="button"
-            className="icon-btn"
-            onClick={onClose}
-            aria-label="Cerrar modal"
-            data-testid="button-close-reminder-modal"
-          >
-            <X size={18} />
-          </button>
-        </div>
-
-        <div
-          style={{
-            background: 'hsl(var(--muted) / 0.5)',
-            border: '1px solid hsl(var(--border))',
-            borderRadius: '12px',
-            padding: '14px 16px',
-            marginBottom: '20px',
-            fontSize: '13px',
-            lineHeight: 1.5,
-          }}
-        >
-          <div style={{ fontWeight: 600, fontSize: '15px', color: 'hsl(var(--foreground))', marginBottom: '4px' }}>
-            📌 {task.title}
-          </div>
-          {task.description && (
-            <div style={{ color: 'hsl(var(--muted-foreground))', marginBottom: '8px' }}>
-              {task.description}
-            </div>
-          )}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', paddingTop: '8px', borderTop: '1px solid hsl(var(--border))' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'hsl(var(--foreground))' }}>
-              <Clock size={14} style={{ color: 'hsl(var(--primary))' }} />
-              <strong>Hora de la alarma:</strong>
-              <span>{formattedStr}</span>
-            </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'hsl(var(--muted-foreground))' }}>
-              <CalendarDays size={14} />
-              <span>Entrega final: {formatDue(task.dueAt)}</span>
-            </div>
-            {isPast && (
-              <p style={{ margin: '4px 0 0', color: 'hsl(38 92% 45%)', fontSize: '12px', fontWeight: 500 }}>
-                ⚠️ La hora de las 8:00 PM del día previo ya pasó para esta entrega, pero aún puedes agendar el evento en tu calendario.
-              </p>
-            )}
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => openGoogleCalendarReminder(task)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              borderRadius: '12px',
-              textAlign: 'left',
-              width: '100%',
-            }}
-            data-testid="button-gcal-reminder"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{
-                background: 'hsl(217 91% 60% / 0.15)',
-                color: 'hsl(217 91% 60%)',
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                display: 'grid',
-                placeItems: 'center',
-              }}>
-                <Calendar size={20} />
-              </div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '14px' }}>Google Calendar</div>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
-                  Abre en tu app con alarma y notificación a las 8:00 PM
-                </div>
-              </div>
-            </div>
-            <ExternalLink size={16} style={{ color: 'hsl(var(--muted-foreground))' }} />
-          </button>
-
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => {
-              downloadIcsReminder(task);
-              setDownloadedIcs(true);
-            }}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              borderRadius: '12px',
-              textAlign: 'left',
-              width: '100%',
-            }}
-            data-testid="button-ics-reminder"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{
-                background: 'hsl(142 71% 45% / 0.15)',
-                color: 'hsl(142 71% 45%)',
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                display: 'grid',
-                placeItems: 'center',
-              }}>
-                <Download size={20} />
-              </div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                  {downloadedIcs ? '¡Archivo descargado! Ábrelo en tu teléfono' : 'Apple Calendar / Celular (.ics)'}
-                </div>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
-                  Para iPhone, iPad, Android y app de Calendario nativa
-                </div>
-              </div>
-            </div>
-            {downloadedIcs ? <Check size={16} style={{ color: 'hsl(142 71% 45%)' }} /> : <Download size={16} style={{ color: 'hsl(var(--muted-foreground))' }} />}
-          </button>
-
-          <button
-            type="button"
-            className="secondary-btn"
-            onClick={() => shareWhatsAppReminder(task)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              padding: '12px 16px',
-              borderRadius: '12px',
-              textAlign: 'left',
-              width: '100%',
-            }}
-            data-testid="button-whatsapp-reminder"
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              <div style={{
-                background: 'hsl(142 70% 49% / 0.15)',
-                color: 'hsl(142 70% 39%)',
-                width: '36px',
-                height: '36px',
-                borderRadius: '8px',
-                display: 'grid',
-                placeItems: 'center',
-              }}>
-                <MessageCircle size={20} />
-              </div>
-              <div>
-                <div style={{ fontWeight: 600, fontSize: '14px' }}>Compartir a WhatsApp</div>
-                <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
-                  Enviar aviso listo al grupo del salón o a tu chat personal
-                </div>
-              </div>
-            </div>
-            <ExternalLink size={16} style={{ color: 'hsl(var(--muted-foreground))' }} />
-          </button>
-
-          {onToggleBrowserReminder && (
-            <button
-              type="button"
-              className="secondary-btn"
-              onClick={onToggleBrowserReminder}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                padding: '12px 16px',
-                borderRadius: '12px',
-                textAlign: 'left',
-                width: '100%',
-              }}
-              data-testid="button-browser-reminder"
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <div style={{
-                  background: browserReminderActive ? 'hsl(var(--primary) / 0.15)' : 'hsl(var(--muted))',
-                  color: browserReminderActive ? 'hsl(var(--primary))' : 'hsl(var(--muted-foreground))',
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '8px',
-                  display: 'grid',
-                  placeItems: 'center',
-                }}>
-                  {browserReminderActive ? <BellRing size={20} /> : <Bell size={20} />}
-                </div>
-                <div>
-                  <div style={{ fontWeight: 600, fontSize: '14px' }}>
-                    {browserReminderActive ? 'Recordatorio web activo' : 'Aviso en este navegador'}
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'hsl(var(--muted-foreground))' }}>
-                    Notificación si tienes la pestaña de la web abierta
-                  </div>
-                </div>
-              </div>
-              {browserReminderActive ? <Check size={16} style={{ color: 'hsl(var(--primary))' }} /> : null}
-            </button>
-          )}
-        </div>
-
-        <div className="form-actions" style={{ marginTop: '20px' }}>
-          <button type="button" className="primary-btn" onClick={onClose} data-testid="button-done-reminder">
-            Entendido
-          </button>
-        </div>
-      </div>
-    </div>
-  );
 }
 
 function TaskFormModal({
@@ -991,7 +655,6 @@ function TeacherPage() {
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [deletingTaskId, setDeletingTaskId] = useState<number | null>(null);
   const [taskToDelete, setTaskToDelete] = useState<Task | null>(null);
-  const [teacherReminderTask, setTeacherReminderTask] = useState<Task | null>(null);
   const [supabaseModalOpen, setSupabaseModalOpen] = useState(false);
   const [copiedSql, setCopiedSql] = useState(false);
   const [sbUrlInput, setSbUrlInput] = useState(() => getClientSupabaseConfig()?.url ?? '');
@@ -1196,7 +859,6 @@ function TeacherPage() {
                     onEdit={() => openEdit(task)}
                     onDelete={() => setTaskToDelete(task)}
                     deletePending={deletingTaskId === task.id}
-                    onReminder={() => setTeacherReminderTask(task)}
                   />
                 ))}
               </div>
@@ -1397,9 +1059,6 @@ function TeacherPage() {
           </div>
         </div>
       )}
-      {teacherReminderTask && (
-        <ReminderModal task={teacherReminderTask} onClose={() => setTeacherReminderTask(null)} />
-      )}
     </AppFrame>
   );
 }
@@ -1413,79 +1072,12 @@ function StudentPage() {
     course ? { course } : undefined,
     { query: { queryKey: getListTasksQueryKey(course ? { course } : undefined), enabled: Boolean(course), retry: false } },
   );
-  const [reminders, setReminders] = useState<Record<number, number>>(() => {
-    try {
-      const stored = JSON.parse(safeStorageGet(REMINDER_KEY) ?? '{}') as Record<string, number> | number[];
-      if (Array.isArray(stored)) return Object.fromEntries(stored.map((id) => [id, Date.now()]));
-      return Object.fromEntries(Object.entries(stored).map(([id, at]) => [Number(id), at]));
-    } catch {
-      return {};
-    }
-  });
-  const [notice, setNotice] = useState<string | null>(null);
-  const [selectedReminderTask, setSelectedReminderTask] = useState<Task | null>(null);
 
   useEffect(() => {
     if (!sessionQuery.isLoading && (!session || session.role !== 'student')) setLocation('/');
   }, [session, sessionQuery.isLoading, setLocation]);
 
-  const persistReminders = (next: Record<number, number>) => {
-    setReminders(next);
-    safeStorageSet(REMINDER_KEY, JSON.stringify(next));
-  };
-
-  const notifyTask = (task: Task) => {
-    try {
-      if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
-        new Notification('Tareas', { body: `Mañana tienes tarea: ${task.title}` });
-      }
-      setNotice(`Aviso: mañana tienes “${task.title}”.`);
-    } catch {
-      setNotice('El recordatorio está guardado.');
-    }
-    const next = { ...reminders };
-    delete next[task.id];
-    persistReminders(next);
-  };
-
-  useEffect(() => {
-    const timers = (taskQuery.data ?? []).flatMap((task) => {
-      const reminderAt = reminders[task.id];
-      if (!reminderAt) return [];
-      return [window.setTimeout(() => notifyTask(task), Math.max(0, reminderAt - Date.now()))];
-    });
-    return () => timers.forEach((timer) => window.clearTimeout(timer));
-  }, [taskQuery.data, reminders]);
-
   if (!session || session.role !== 'student') return null;
-
-  const toggleReminder = async (task: Task) => {
-    if (reminders[task.id]) {
-      const next = { ...reminders };
-      delete next[task.id];
-      persistReminders(next);
-      setNotice('Recordatorio desactivado.');
-      return;
-    }
-    if (typeof window === 'undefined' || !('Notification' in window)) {
-      setNotice('Tu navegador no permite notificaciones. Puedes volver a revisar esta página cuando quieras.');
-      return;
-    }
-    try {
-      let permission = Notification.permission;
-      if (permission === 'default') permission = await Notification.requestPermission();
-      if (permission !== 'granted') {
-        setNotice('Las notificaciones están bloqueadas en tu navegador. Actívalas desde la configuración para usar recordatorios.');
-        return;
-      }
-      const dueAt = new Date(task.dueAt).getTime();
-      const reminderAt = Math.max(Date.now(), dueAt - 24 * 60 * 60 * 1000);
-      persistReminders({ ...reminders, [task.id]: reminderAt });
-      setNotice(`Recordatorio activo para ${formatDue(new Date(reminderAt).toISOString())}.`);
-    } catch {
-      setNotice('No pudimos activar notificaciones en este navegador. Revisa sus permisos para continuar.');
-    }
-  };
 
   return (
     <AppFrame session={session} course={course}>
@@ -1493,15 +1085,14 @@ function StudentPage() {
         <section className="student-hero animate-in">
           <p className="eyebrow" style={{ color: 'hsl(var(--sidebar-primary))' }}>Tu espacio de estudio</p>
           <h1>Hola. Aquí está lo que necesitas preparar.</h1>
-          <p>Revisa con calma las indicaciones de tu curso {course ?? 'sin asignar'} y activa un recordatorio cuando no quieras olvidarlo.</p>
+          <p>Revisa las indicaciones de tu curso {course ?? 'sin asignar'} y agrégalas a tu Google Calendar con un solo clic.</p>
         </section>
-        {notice && <div className="notice success animate-in" role="status" data-testid="status-reminder-notice"><Check size={17} /><span>{notice}</span><button type="button" onClick={() => setNotice(null)} aria-label="Cerrar aviso" data-testid="button-close-notice"><X size={15} /></button></div>}
         {!course ? (
           <section className="task-panel animate-in delay-1"><EmptyTasks student /></section>
         ) : taskQuery.isError ? (
           <ErrorNotice message={errorMessage(taskQuery.error, 'No pudimos cargar tus tareas.')} onRetry={() => taskQuery.refetch()} />
         ) : (
-          <section className="task-panel animate-in delay-1" style={{ marginTop: notice ? 18 : 0 }}>
+          <section className="task-panel animate-in delay-1">
             <div className="panel-heading">
               <div><h2>Lo que sigue</h2><p>{taskQuery.isLoading ? 'Buscando tus tareas…' : `${taskQuery.data?.length ?? 0} tareas para tu curso.`}</p></div>
               <BookOpen size={22} color="hsl(var(--primary))" />
@@ -1512,8 +1103,6 @@ function StudentPage() {
                   <TaskCard
                     key={task.id}
                     task={task}
-                    reminderActive={Boolean(reminders[task.id])}
-                    onReminder={() => setSelectedReminderTask(task)}
                   />
                 ))}
               </div>
@@ -1521,14 +1110,6 @@ function StudentPage() {
           </section>
         )}
       </div>
-      {selectedReminderTask && (
-        <ReminderModal
-          task={selectedReminderTask}
-          onClose={() => setSelectedReminderTask(null)}
-          browserReminderActive={Boolean(reminders[selectedReminderTask.id])}
-          onToggleBrowserReminder={() => toggleReminder(selectedReminderTask)}
-        />
-      )}
     </AppFrame>
   );
 }
