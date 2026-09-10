@@ -1,0 +1,14 @@
+{
+  "buildCommand": "NODE_ENV=production PORT=25518 BASE_PATH=/ pnpm --filter @workspace/tareas run build",
+  "outputDirectory": "artifacts/tareas/dist/public",
+  "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
